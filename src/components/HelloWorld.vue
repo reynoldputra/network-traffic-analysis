@@ -1,0 +1,20 @@
+<script setup>
+// import { ref } from 'vue'
+
+// defineProps({
+//   msg: String,
+// })
+
+// const count = ref(0)
+</script>
+
+<template>
+ 
+<div class="py-10 px-20 ">Network Traficc Analysis</div> 
+</template>
+
+<style scoped>
+.read-the-docs {
+  color: #888;
+}
+</style>
