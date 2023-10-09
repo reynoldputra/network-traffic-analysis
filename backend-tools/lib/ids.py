@@ -9,7 +9,10 @@ from collections import Counter, defaultdict, deque
 from collections import defaultdict, deque
 
 import pyshark
+from datetime import datetime
 import requests
+
+from database.database import dbCreate
 
 cache_file = "cache.pkl"
 
@@ -241,16 +244,35 @@ def is_malicious_packet(packet, malicious_definitions):
             return False
 
         src_ip = packet.IP.src
+        src_port = ""
         dst_ip = packet.IP.dst
+        dst_port = ""
+        timestamp = float(packet.sniff_timestamp)
+        dt = datetime.utcfromtimestamp(timestamp)
+
+        # Convert the datetime object to a string in SQLite DATETIME format
+        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+        if(hasattr(packet, 'tcp')):
+            src_port = packet.tcp.srcport
+            dst_port = packet.tcp.dstport
+
+        if(hasattr(packet, 'udp')):
+            src_port = packet.udp.srcport
+            dst_port = packet.udp.dstport
 
         if 'ip' in malicious_definitions:
             for source_name, ip_list in malicious_definitions['ip'].items():
                 if src_ip in ip_list or dst_ip in ip_list:
+                    print("Bad IP")
+                    write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "Bad IP" )
                     logging.info(f"Malicious packet detected from {source_name}: {src_ip} -> {dst_ip}")
                     return True
 
         domain = extract_domain(packet)
         if domain and any(domain in domain_list for domain_list in malicious_definitions['domain'].values()):
+            print("Domain Match")
+            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "Domain Match" )
             logging.info(f"Malicious packet detected (domain match): {domain}")
             return True
 
@@ -270,26 +292,38 @@ def is_malicious_packet(packet, malicious_definitions):
                             pattern = signature
 
                         if pattern.search(payload):
+                            print("Bad Signature")
+                            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "Bad Signature" )
                             return True, category
 
         malware_delivery = detect_malware_delivery(packet, malicious_definitions)
         if malware_delivery:
+            print("Malware Delivery")
+            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "Malware Delivery" )
             logging.info(malware_delivery)
             return True
 
         if detect_phishing_attempts(packet, malicious_definitions):
+            print("Phising")
+            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "Phising" )
             logging.info("Phishing attempt detected")
             return True
 
         if detect_brute_force_attacks(packet, malicious_definitions):
+            print("Brute Force")
+            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "Brute Force" )
             logging.info("Brute force attack detected")
             return True
 
         if detect_ddos_attacks(packet, malicious_definitions):
+            print("DDOS")
+            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "DDOS" )
             logging.info("DDoS attack detected")
             return True
 
         if detect_cc_traffic(packet, malicious_definitions):
+            print("C&C")
+            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, "C&C Traffix" )
             logging.info("C&C traffic detected")
             return True
 
@@ -339,14 +373,27 @@ def main(pcap_file, output=None, verbose=False):
     try:
         malicious_definitions = load_malicious_definitions("../data/malicious.json")
         malicious_data = update_definitions(malicious_definitions)
-        if output:
-            sys.stdout = open(output, 'w')
+        # if output:
+        #     sys.stdout = open(output, 'w')
+
         analyze_pcap(pcap_file, malicious_data)
 
-        if output:
-            sys.stdout.close()
+        # if output:
+        #     sys.stdout.close()
     except Exception as e:
         logging.error(f"Error in main function: {e}")
+
+def write_log(timestamp, src_ip, src_port, dest_ip, dest_port, detail):
+    insert_query = '''
+        INSERT INTO log (timestamp, src_ip, src_port, dst_ip, dst_port, detail)
+        VALUES (?, ?, ?, ?, ?, ?)
+    '''
+    data = (timestamp, src_ip, src_port, dest_ip, dest_port, detail)
+    try:
+        dbCreate(insert_query, data)
+        print("Data successfully inserted into the 'log' table.")
+    except Exception as e:
+        print(f"Error occurred: {e}")
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Analyze a pcap file to detect malicious traffic")
