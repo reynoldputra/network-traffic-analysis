@@ -1,11 +1,11 @@
 <script setup>
-import HelloWorld from "./components/HelloWorld.vue";
+import HeaderView from "./components/HeaderView.vue";
 import TableView from "./components/TableView.vue";
 </script>
 
 <template>
   <div>
-    <HelloWorld />
+    <HeaderView />
     <TableView />
   </div>
 </template>
