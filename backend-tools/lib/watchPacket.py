@@ -7,6 +7,7 @@ import re
 import sys
 from collections import Counter, defaultdict, deque
 from collections import defaultdict, deque
+from datetime import datetime
 
 import pyshark
 import requests
@@ -161,6 +162,9 @@ packet_window = deque(maxlen=window_size)
 def detect_ddos_attacks(packet, window_size=10, threshold=100):
     global src_ip_counter, dst_ip_counter, packet_window
 
+    if not hasattr(packet, 'IP'):
+        return False
+
     src_ip = packet.IP.src  
     dst_ip = packet.IP.dst  
     timestamp = float(packet.sniff_timestamp)  
@@ -181,21 +185,26 @@ def detect_ddos_attacks(packet, window_size=10, threshold=100):
     return False
 
 
-def detect_malicious_patterns(packet_stream):
+def detect_malicious_patterns(packet):
     patterns = [
         (re.compile(r'GET /(?:\.\./\w+)+', re.IGNORECASE), 'Directory Traversal Attack'),
         (re.compile(r'(?:\%3C|\x3C)[\w\s]*?(?:\%2F|\x2F)[\w\s]*?(?:\%3E|\x3E)', re.IGNORECASE), 'Cross-site Scripting (XSS) Attack'),
         (re.compile(r'[\w\.\-_]+@[\w\.\-_]+\.\w+', re.IGNORECASE), 'Email Address Harvesting'),
-        (re.compile(r'(?:\%27|\x27|\'|\%2527|%5C)(?:\%45|\x45|E)(?:\%58|\x58|X)(?:\%50|\x50|R)', re.IGNORECASE), 'SQL Injection Attack')
+        (re.compile(r'GET (\s*([\0\b\'\"\n\r\t\%\_\\]*\s*(((select\s*.+\s*from\s*.+)|(insert\s*.+\s*into\s*.+)|(update\s*.+\s*set\s*.+)|(delete\s*.+\s*from\s*.+)|(drop\s*.+)|(truncate\s*.+)|(alter\s*.+)|(exec\s*.+)|(\s*(all|any|not|and|between|in|like|or|some|contains|containsall|containskey)\s*.+[\=\>\<=\!\~]+.+)|(let\s+.+[\=]\s*.*)|(begin\s*.*\s*end)|(\s*[\/\*]+\s*.*\s*[\*\/]+)|(\s*(\-\-)\s*.*\s+)|(\s*(contains|containsall|containskey)\s+.*)))(\s*[\;]\s*)*)+)', re.IGNORECASE), 'SQL Injection Attack')
     ]
 
-    for packet in packet_stream:
-        payload = packet['payload']
+    if hasattr(packet, 'tcp'):
+        payload = packet.tcp.payload
+        payload = bytes.fromhex(payload.replace(':', '')).decode('utf-8', 'ignore')
+        print(payload)
         
         for pattern, attack_name in patterns:
+            print(attack_name, pattern, pattern.search(payload))
             if pattern.search(payload):
                 logging.info(f"Malicious pattern detected! Attack type: {attack_name}, Packet: {packet}")
-                break
+                return True, attack_name
+
+    return False, ""
 
 def detect_cc_traffic(packet, malicious_definitions):
     if 'DNS' in packet:
@@ -245,8 +254,20 @@ def is_malicious_packet(packet, malicious_definitions):
         src_ip = packet.IP.src
         src_port = ""
         dst_ip = packet.IP.dst
-        dst_port = packet.transport_layer.dstport
-        timestamp = packet.sniff_timestamp
+        dst_port = ""
+        timestamp = float(packet.sniff_timestamp)
+        dt = datetime.utcfromtimestamp(timestamp)
+
+        # Convert the datetime object to a string in SQLite DATETIME format
+        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+        if(hasattr(packet, 'tcp')):
+            src_port = packet.tcp.srcport
+            dst_port = packet.tcp.dstport
+
+        if(hasattr(packet, 'udp')):
+            src_port = packet.udp.srcport
+            dst_port = packet.udp.dstport
 
         if 'ip' in malicious_definitions:
             for source_name, ip_list in malicious_definitions['ip'].items():
@@ -261,23 +282,28 @@ def is_malicious_packet(packet, malicious_definitions):
             logging.info(f"Malicious packet detected (domain match): {domain}")
             return True
 
-        if 'TCP' in packet or 'UDP' in packet:
-            payload = packet.tcp.payload if 'TCP' in packet else packet.udp.payload if 'UDP' in packet else ''
+        # if 'TCP' in packet or 'UDP' in packet:
+        #     payload = packet.tcp.payload if 'TCP' in packet else packet.udp.payload if 'UDP' in packet else ''
 
-            if payload and is_hex_string(payload.replace(':', '')):
-                payload_int = int(payload.replace(':', ''), 16)
-                # Perform further processing with payload_int
+        #     if payload and is_hex_string(payload.replace(':', '')):
+        #         payload_int = int(payload.replace(':', ''), 16)
+        #         # Perform further processing with payload_int
 
-            if 'signature' in malicious_definitions:
-                for category, signatures in malicious_definitions['signature'].items():
-                    for signature in signatures:
-                        if isinstance(signature, str):
-                            pattern = re.compile(signature, re.IGNORECASE)
-                        else:
-                            pattern = signature
+        #     if 'signature' in malicious_definitions:
+        #         for category, signatures in malicious_definitions['signature'].items():
+        #             for signature in signatures:
+        #                 if isinstance(signature, str):
+        #                     pattern = re.compile(signature, re.IGNORECASE)
+        #                 else:
+        #                     pattern = signature
 
-                        if pattern.search(payload):
-                            return True, category
+        #                 if pattern.search(payload):
+        #                     return True, category
+
+        true, attack_name = detect_malicious_patterns(packet)
+        if true:
+            write_log(timestamp, src_ip, src_port, dst_ip, dst_port, attack_name)
+            logging.info(attack_name)
 
         malware_delivery = detect_malware_delivery(packet, malicious_definitions)
         if malware_delivery:
@@ -318,11 +344,15 @@ def is_malicious_packet(packet, malicious_definitions):
 
 def write_log(timestamp, src_ip, src_port, dest_ip, dest_port, detail):
     insert_query = '''
-        INSERT INTO log (timestamp, src, dst, detail)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO log (timestamp, src_ip, src_port, dst_ip, dst_port, detail)
+        VALUES (?, ?, ?, ?, ?, ?)
     '''
     data = (timestamp, src_ip, src_port, dest_ip, dest_port, detail)
-    dbCreate(insert_query, data)
+    try:
+        dbCreate(insert_query, data)
+        print("Data successfully inserted into the 'log' table.")
+    except Exception as e:
+        print(f"Error occurred: {e}")
 
             
 if __name__ == "__main__":
@@ -340,29 +370,45 @@ if __name__ == "__main__":
                 detail TEXT
             )
         '''
+
+        print(table_exists)
         if not table_exists:
             dbCreate(create_table_query)
+            print("succes creating table")
 
-        # capture = pyshark.LiveCapture('eth0')
+        capture = pyshark.LiveCapture('eth0')
+        dirname = os.path.dirname(__file__)
 
-        # for packet in capture:
-        #     if hasattr(packet, 'ip'):
-        #         src_ip = packet.ip.src
-        #         dst_ip = packet.ip.dst
-        #         timestamp = float(packet.sniff_timestamp)
+        full_path = os.path.join(dirname, "../data/malicious.json")
 
-        #         packet_info = {
-        #             'src_ip': src_ip,
-        #             'dst_ip': dst_ip,
-        #             'timestamp': timestamp
-        #         }
+        print(full_path)
 
-        #         print(packet_info)
+        print("Loading malicious def")
+        malicious_definitions = load_malicious_definitions(full_path)
+        print("Done load malicious def")
+        print("Updating malicious def")
+        malicious_data = update_definitions(malicious_definitions)
+        print("Done update malicious def")
 
-        #         malicious_definitions = load_malicious_definitions("../data/malicious.json")
-        #         malicious_data = update_definitions(malicious_definitions)
-        #         if is_malicious_packet(packet, malicious_data):
-        #             logging.info("Malicious packet detected: %s", packet)
-        #             malicious_packet_detected = True
+        logging.info("Live Capture Packets")
+
+        for packet in capture:
+            if hasattr(packet, 'ip'):
+                src_ip = packet.ip.src
+                dst_ip = packet.ip.dst
+                timestamp = float(packet.sniff_timestamp)
+
+                packet_info = {
+                    'src_ip': src_ip,
+                    'dst_ip': dst_ip,
+                    'timestamp': timestamp
+                }
+
+                print(packet_info)
+
+                if is_malicious_packet(packet, malicious_data):
+                    logging.info("Malicious packet detected: %s", packet)
+                    malicious_packet_detected = True
+
     except Exception as e:
         logging.error(f"Error while analyzing pcap file: {e}") 
