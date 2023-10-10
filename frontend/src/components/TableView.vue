@@ -1,14 +1,29 @@
 <script setup>
-const data = [
-  {
-    timestamp : "fadfads",
-    src_ip : "fadfads",
-    src_port : "fadfads",
-    dst_ip : "fadfads",
-    dst_port : "fadfads",
-    detail : "fadfads",
-  }
-]
+  import axios from 'axios';
+
+  const fetchData = async () => {
+    try {
+      const response = await axios.get('http://localhost:5001/data'); 
+      const data = response.data; 
+    
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
+  onMounted(() => {
+    fetchData();
+  });
+
+  const data = [
+    {
+      timestamp: 'fadfads',
+      src_ip: 'fadfads',
+      src_port: 'fadfads',
+      dst_ip: 'fadfads',
+      dst_port: 'fadfads',
+      detail: 'fadfads',
+    },
+  ];
 </script>
 
 <template>
