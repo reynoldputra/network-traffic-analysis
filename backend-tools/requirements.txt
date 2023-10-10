@@ -1,3 +1,6 @@
 fastapi
 pymongo
 uvicorn
+pyshark
+request
+re

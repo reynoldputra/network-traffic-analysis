@@ -9,7 +9,7 @@ const detail = ["Detail 1", "Detail 2", "Detail 3"];
   <div class="bg-[#FAF0F0] w-[1260px] mx-[117px] my-[10px] text-[#1F3C9C]">
     <div class="grid grid-cols-4 gap-4">
       <div>
-        <div class="font-bold">Time</div>
+        <div class="font-bold">Timestamp</div>
         <div v-for="(time, index) in times" :key="'time-' + index" class="py-2">
           {{ time }}
         </div>
