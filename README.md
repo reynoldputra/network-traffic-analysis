@@ -5,10 +5,10 @@
 ### Backend
 - [x] create / find python script to analyze malicious traffic/packet from pcap file
 - [x] find malicous pcap file
-- [ ] rest api for run command and save the result in db
+- [x] rest api for run command and save the result in db
 - [x] setup docker compose
 
 
 ### Frontend
-- [ ] integrate api consume
-- [ ] move branch to main
+- [x] integrate api consume
+- [x] move branch to main
