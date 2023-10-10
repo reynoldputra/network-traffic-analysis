@@ -1,4 +1,3 @@
-import argparse
 import json
 import logging
 import os
@@ -8,6 +7,8 @@ import sys
 from collections import Counter, defaultdict, deque
 from collections import defaultdict, deque
 from datetime import datetime
+from urllib.parse import unquote
+
 
 import pyshark
 import requests
@@ -187,8 +188,8 @@ def detect_ddos_attacks(packet, window_size=10, threshold=100):
 
 def detect_malicious_patterns(packet):
     patterns = [
-        (re.compile(r'GET /(?:\.\./\w+)+', re.IGNORECASE), 'Directory Traversal Attack'),
-        (re.compile(r'(?:\%3C|\x3C)[\w\s]*?(?:\%2F|\x2F)[\w\s]*?(?:\%3E|\x3E)', re.IGNORECASE), 'Cross-site Scripting (XSS) Attack'),
+        (re.compile(r'/GET (?:(?:\/|\\)?\.+(\/|\\)(?:\.+)?)|(?:\w\.exe\??\s)|(?:;\s*\w+\s*\/[\w*-]+\/)| (?:\d\.\dx\|)| (?:%(?:c0\.|af\.|5c\.))|(?:\/(?:%2e){2})/gm', re.IGNORECASE), 'Directory Traversal Attack'),
+        (re.compile(r'(?:alert\(|prompt\(|confirm\(|eval\(|setTimeout\(|setInterval\(|XMLHttpRequest\(|fetch\(|localStorage\(|sessionStorage\(|cookie\()|\bunescape\(|String\.fromCharCode\(|window\.open\(|document\.write\(|innerHTML\(|outerHTML\(|on\w+\s*=|\b(?:\bon\w+\s*=\s*["\'][^"\']+[\'"]\s*){2,}', re.IGNORECASE), 'Cross-site Scripting (XSS) Attack'),
         (re.compile(r'[\w\.\-_]+@[\w\.\-_]+\.\w+', re.IGNORECASE), 'Email Address Harvesting'),
         (re.compile(r'GET (\s*([\0\b\'\"\n\r\t\%\_\\]*\s*(((select\s*.+\s*from\s*.+)|(insert\s*.+\s*into\s*.+)|(update\s*.+\s*set\s*.+)|(delete\s*.+\s*from\s*.+)|(drop\s*.+)|(truncate\s*.+)|(alter\s*.+)|(exec\s*.+)|(\s*(all|any|not|and|between|in|like|or|some|contains|containsall|containskey)\s*.+[\=\>\<=\!\~]+.+)|(let\s+.+[\=]\s*.*)|(begin\s*.*\s*end)|(\s*[\/\*]+\s*.*\s*[\*\/]+)|(\s*(\-\-)\s*.*\s+)|(\s*(contains|containsall|containskey)\s+.*)))(\s*[\;]\s*)*)+)', re.IGNORECASE), 'SQL Injection Attack')
     ]
@@ -199,7 +200,7 @@ def detect_malicious_patterns(packet):
         print(payload)
         
         for pattern, attack_name in patterns:
-            print(attack_name, pattern, pattern.search(payload))
+            print(attack_name, pattern, pattern.search(unquote(payload)))
             if pattern.search(payload):
                 logging.info(f"Malicious pattern detected! Attack type: {attack_name}, Packet: {packet}")
                 return True, attack_name
